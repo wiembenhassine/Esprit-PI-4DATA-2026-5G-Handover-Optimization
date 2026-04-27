@@ -1,0 +1,26 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Virtual environment
+venv/
+env/
+
+# Frontend build
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker build cache
+wheels/
+
+# Environment secrets
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db

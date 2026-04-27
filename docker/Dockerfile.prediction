@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install base deps from local wheels (no internet needed)
+COPY wheels/ ./wheels/
+COPY requirements.base.txt .
+RUN pip install --no-cache-dir --no-index --find-links=./wheels -r requirements.base.txt
+
+# Install tensorflow-cpu from mirror (small isolated download)
+COPY requirements.prediction.txt .
+RUN pip install --no-cache-dir --timeout=300 --retries=5 \
+    -i https://mirrors.aliyun.com/pypi/simple \
+    -r requirements.prediction.txt
+
+COPY shared/         ./shared/
+COPY services/       ./services/
+COPY model_registry/ ./model_registry/
+COPY __init__.py     .
+
+HEALTHCHECK --interval=20s --timeout=10s --start-period=120s --retries=5 \
+  CMD curl -sf http://localhost:8003/health || exit 1

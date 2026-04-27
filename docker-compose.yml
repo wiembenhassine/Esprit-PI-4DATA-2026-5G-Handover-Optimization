@@ -1,0 +1,178 @@
+networks:
+  handover_net:
+    driver: bridge
+
+x-base-svc: &base-svc
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.base
+  networks:
+    - handover_net
+  restart: unless-stopped
+  environment: &base-env
+    SECRET_KEY:             ${SECRET_KEY:-CHANGE_ME_IN_PROD_32chars_minimum}
+    INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-internal-service-secret-token-change-in-prod}
+    AUTH_URL:               http://auth:8007
+    DATA_INGESTION_URL:     http://data-ingestion:8001
+    DATA_PROCESSING_URL:    http://data-processing:8002
+    PREDICTION_URL:         http://prediction:8003
+    MONITORING_URL:         http://monitoring:8004
+    MLOPS_URL:              http://mlops:8005
+    DASHBOARD_URL:          http://dashboard:8006
+    MODEL_DIR:              /app/model_registry
+    KERAS_ENSEMBLE:         "false"
+    ALLOWED_ORIGINS:        '["*"]'
+
+services:
+
+  # ── 1. Auth ──────────────────────────────────────────────────────────────────
+  auth:
+    <<: *base-svc
+    container_name: auth-service
+    command: uvicorn services.auth.main:app --host 0.0.0.0 --port 8007
+    ports: ["8007:8007"]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8007/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  # ── 2. Data Ingestion ─────────────────────────────────────────────────────────
+  data-ingestion:
+    <<: *base-svc
+    container_name: data-ingestion-service
+    command: uvicorn services.data_ingestion.main:app --host 0.0.0.0 --port 8001
+    ports: ["8001:8001"]
+    depends_on:
+      auth: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # ── 3. Data Processing ────────────────────────────────────────────────────────
+  data-processing:
+    <<: *base-svc
+    container_name: data-processing-service
+    command: uvicorn services.data_processing.main:app --host 0.0.0.0 --port 8002
+    ports: ["8002:8002"]
+    depends_on:
+      auth: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # ── 4. Prediction (adds tensorflow-cpu on top of base) ────────────────────────
+  prediction:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prediction
+    container_name: prediction-service
+    networks:
+      - handover_net
+    restart: unless-stopped
+    environment:
+      <<: *base-env
+    command: uvicorn services.prediction.main:app --host 0.0.0.0 --port 8003
+    ports: ["8003:8003"]
+    depends_on:
+      auth: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8003/health"]
+      interval: 20s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+
+  # ── 5. Monitoring ─────────────────────────────────────────────────────────────
+  monitoring:
+    <<: *base-svc
+    container_name: monitoring-service
+    command: uvicorn services.monitoring.main:app --host 0.0.0.0 --port 8004
+    ports: ["8004:8004"]
+    depends_on:
+      auth: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8004/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # ── 6. MLOps ──────────────────────────────────────────────────────────────────
+  mlops:
+    <<: *base-svc
+    container_name: mlops-service
+    command: uvicorn services.mlops.main:app --host 0.0.0.0 --port 8005
+    ports: ["8005:8005"]
+    depends_on:
+      auth: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8005/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # ── 7. Dashboard ──────────────────────────────────────────────────────────────
+  dashboard:
+    <<: *base-svc
+    container_name: dashboard-service
+    command: uvicorn services.dashboard.main:app --host 0.0.0.0 --port 8006
+    ports: ["8006:8006"]
+    depends_on:
+      prediction: {condition: service_healthy}
+      monitoring:  {condition: service_healthy}
+      mlops:       {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8006/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # ── 8. API Gateway ────────────────────────────────────────────────────────────
+  api-gateway:
+    <<: *base-svc
+    container_name: api-gateway
+    command: uvicorn services.api_gateway.main:app --host 0.0.0.0 --port 8000
+    ports: ["8000:8000"]
+    depends_on:
+      auth:            {condition: service_healthy}
+      data-ingestion:  {condition: service_healthy}
+      data-processing: {condition: service_healthy}
+      prediction:      {condition: service_healthy}
+      monitoring:      {condition: service_healthy}
+      mlops:           {condition: service_healthy}
+      dashboard:       {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 20s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+
+  # ── 9. Frontend (React + nginx) ───────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    networks:
+      - handover_net
+    restart: unless-stopped
+    ports: ["80:80"]
+    depends_on:
+      api-gateway: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health.txt"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

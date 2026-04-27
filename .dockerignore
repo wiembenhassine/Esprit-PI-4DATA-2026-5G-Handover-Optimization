@@ -1,0 +1,19 @@
+# Python cache
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+
+# Frontend build (built inside its own container)
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/5g_dashboard.jsx
+
+# Dev/editor files
+.env.local
+**/*.log
+.DS_Store
+Thumbs.db
+.git
+.gitignore
